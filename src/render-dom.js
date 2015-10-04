@@ -182,22 +182,51 @@ function makeResponseGetter(rootElem$) {
   }
 }
 
-function makeEventsSelector(element$) {
+function recordStream (stream, time$) {
+  return stream
+    .withLatestFrom(time$, (ev, time) => ({timestamp: time, value: ev}))
+    .scan((events, newEvent) => events.concat([newEvent]), [])
+    .share()
+    .startWith([])
+}
+
+function timeTravelStream (recordedStream$, time$) {
+  return Rx.Observable.combineLatest(
+      time$,
+      recordedStream$,
+      (time, events) => (
+        events.slice(0).reverse().find(val => val.timestamp <= time) ||
+        events[0]
+      )
+    )
+    .filter(thing => thing !== undefined && thing.value !== undefined)
+    .map(v => v.value)
+    .distinctUntilChanged()
+}
+
+function makeEventsSelector(element$, time$) {
   return function events(eventName, useCapture = false) {
     if (typeof eventName !== `string`) {
       throw new Error(`DOM driver's get() expects second argument to be a ` +
         `string representing the event type to listen for.`)
     }
-    return element$.flatMapLatest(element => {
+
+    const event$ = element$.flatMapLatest(element => {
       if (!element) {
         return Rx.Observable.empty()
       }
       return fromEvent(element, eventName, useCapture)
     }).share()
+
+    if (time$) {
+      return timeTravelStream(recordStream(event$, time$), time$)
+    }
+
+    return event$
   }
 }
 
-function makeElementSelector(rootElem$) {
+function makeElementSelector(rootElem$, time$) {
   return function select(selector) {
     if (typeof selector !== `string`) {
       throw new Error(`DOM driver's select() expects first argument to be a ` +
@@ -213,7 +242,7 @@ function makeElementSelector(rootElem$) {
       })
     return {
       observable: element$,
-      events: makeEventsSelector(element$),
+      events: makeEventsSelector(element$, time$),
     }
   }
 }
@@ -226,7 +255,9 @@ function validateDOMDriverInput(vtree$) {
 }
 
 function makeDOMDriverWithRegistry(container, CERegistry) {
-  return function domDriver(vtree$, driverName) {
+  let time$;
+
+  const driver = function domDriver(vtree$, driverName) {
     validateDOMDriverInput(vtree$)
     let rawRootElem$ = renderRawRootElem$(
       vtree$, container, {CERegistry, driverName}
@@ -238,10 +269,16 @@ function makeDOMDriverWithRegistry(container, CERegistry) {
     let disposable = rootElem$.connect()
     return {
       get: makeResponseGetter(rootElem$),
-      select: makeElementSelector(rootElem$),
+      select: makeElementSelector(rootElem$, time$),
       dispose: disposable.dispose.bind(disposable),
     }
   }
+
+  driver.enableTimeTravel = function (newTime$) {
+    time$ = newTime$;
+  }
+
+  return driver;
 }
 
 function makeDOMDriver(container, customElementDefinitions = {}) {
