@@ -41,6 +41,7 @@ function mockDOMSource(mockedSelectors = {}) {
     observable: emptyStream,
     select: makeMockSelector(mockedSelectors),
     events: () => emptyStream,
+    isolateSource: (source, scope) => source.select(`.cycle-scope-${scope}`)
   }
 }
 

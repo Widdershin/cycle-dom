@@ -123,4 +123,21 @@ describe('mockDOMSource', function () {
           done();
         });
     });
+
+  it('handles isolate',
+    function (done) {
+      const mockedDOMSource = mockDOMSource({
+        '.cycle-scope-cycle0': {
+          '.foo': {
+              observable: Rx.Observable.just(135)
+          }
+        }
+      });
+
+      mockedDOMSource.isolateSource(mockedDOMSource, 'cycle0').select('.foo').observable
+        .subscribe(e => {
+          assert.strictEqual(e, 135);
+          done();
+        });
+    });
 });
